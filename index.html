@@ -2,17 +2,48 @@
 <html lang="en">
   <head>
     <script>
-      // Restore SPA route from 404.html redirect
-      (function(l) {
+      // Force hash-based routing for GitHub Pages compatibility
+      // The app checks: e() = file: protocol OR pathname ends with .html
+      // We override to always return true so hash routing is used,
+      // avoiding 404 on sub-page navigation (pushState loses /cmb-prototype/ prefix)
+      (function() {
+        // Patch history.pushState to convert /path to #/path
+        var origPushState = window.history.pushState.bind(window.history);
+        window.history.pushState = function(state, title, url) {
+          if (url && typeof url === 'string' && url.startsWith('/') && !url.startsWith('//')) {
+            // Convert path to hash
+            window.location.hash = url;
+            return;
+          }
+          return origPushState(state, title, url);
+        };
+        // Handle direct URL access: if pathname has a sub-route, redirect to hash
+        var l = window.location;
+        var basePath = '/cmb-prototype/';
+        if (l.pathname !== basePath && l.pathname !== basePath + 'index.html' && l.pathname !== '/cmb-prototype' && !l.hash) {
+          var subPath = l.pathname.replace('/cmb-prototype', '');
+          if (subPath && subPath !== '/' && subPath !== '/index.html') {
+            window.location.replace(basePath + '#' + subPath);
+            return;
+          }
+        }
+        // Restore SPA route from 404.html redirect
         if (l.search[1] === '/') {
           var decoded = l.search.slice(1).split('&').map(function(s) {
             return s.replace(/~and~/g, '&')
           }).join('?');
-          window.history.replaceState(null, null,
-            l.pathname.slice(0, -1) + decoded + l.hash
-          );
+          var restored = l.pathname.slice(0, -1) + decoded + l.hash;
+          // Convert to hash-based route
+          if (restored && restored !== basePath && restored.startsWith('/cmb-prototype')) {
+            var subRoute = restored.replace('/cmb-prototype', '');
+            if (subRoute && subRoute !== '/' && subRoute !== '/index.html') {
+              window.location.replace(basePath + '#' + subRoute);
+              return;
+            }
+          }
+          window.history.replaceState(null, null, restored);
         }
-      }(window.location));
+      })();
     </script>
     <!-- Standalone export: all runtime resources are embedded below. -->
     <meta charset="UTF-8" />
