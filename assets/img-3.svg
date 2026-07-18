@@ -18,6 +18,8 @@
     .district { stroke: #f2a9a5; stroke-width: .85; vector-effect: non-scaling-stroke; cursor: pointer; transition: fill .16s ease, opacity .16s ease, filter .16s ease, stroke .16s ease; outline: none; }
     .district:hover, .district:focus-visible { fill: #f49a96; }
     .district.is-selected { fill: url(#focusFill); stroke: #fff; stroke-width: 1.2; filter: url(#focusShadow); }
+    .district.is-filter-match:not(.is-selected), .focus-zone.is-filter-match:not(.is-selected) { fill: #f4a19d; stroke: #e97873; }
+    .district.is-filtered-out, .focus-zone.is-filtered-out { opacity: .18; filter: saturate(.3); pointer-events: none; }
     .district-label { fill: #5f6064; font-family: HarmonyRegion, 'Microsoft YaHei', sans-serif; font-size: 8.2px; font-weight: 500; text-anchor: middle; pointer-events: none; paint-order: stroke; stroke: rgba(255,255,255,.82); stroke-width: 1.6px; transition: opacity .14s ease, fill .14s ease; }
     .district-label.is-dense { opacity: 0; }
     .district-label.is-preview, .district-label.is-dense.is-selected { opacity: 1; }
@@ -28,6 +30,8 @@
     .focus-zone.is-selected { fill: url(#focusFill); stroke: #fff; stroke-width: 1.2; filter: url(#focusShadow); }
     .focus-label { fill: #5f6064; font-family: HarmonyRegion, 'Microsoft YaHei', sans-serif; font-size: 10px; font-weight: 700; text-anchor: middle; pointer-events: none; paint-order: stroke; stroke: rgba(255,255,255,.82); stroke-width: 1.6px; }
     .focus-label.is-selected { fill: #fff; stroke: rgba(179,10,18,.42); stroke-width: 1.2px; }
+    .district-label.is-filter-match:not(.is-selected), .focus-label.is-filter-match:not(.is-selected) { fill: #9d262b; font-weight: 700; }
+    .district-label.is-filtered-out, .focus-label.is-filtered-out { opacity: .14 !important; }
     .tooltip { opacity: 0; transition: opacity .16s ease; pointer-events: none; }
     .tooltip.is-visible { opacity: 1; }
     .tooltip rect { fill: rgba(255,255,255,.98); stroke: #f1b7b4; stroke-width: .8; filter: url(#focusShadow); }
@@ -97,6 +101,63 @@
     const tooltipIndustry = document.getElementById('tooltipIndustry');
     let selected = document.querySelector('[data-region="高新区"]');
     let pinned = false;
+    let activeFilters = { industry: '全部行业', scale: '全部规模', premiumOnly: false };
+    const premiumRegions = new Set(['锦江区', '青羊区', '武侯区', '龙泉驿区', '双流区', '郫都区', '温江区', '新都区', '彭州市', '高新区']);
+    const industryGroups = {
+      电子信息: ['电子信息', '软件服务', '数字文创'],
+      生物医药: ['生物医药', '文旅康养'],
+      先进制造: ['汽车制造', '智能制造', '先进制造', '绿色制造', '家居制造'],
+      现代服务: ['金融商务', '总部服务', '商贸服务', '国际物流', '航空物流', '文旅服务', '临空经济'],
+      消费农业: ['现代农业', '食品饮料']
+    };
+    const regionScales = (region) => {
+      if (region.dataset.density === '高') return ['大型企业', '中型企业', '小微企业'];
+      if (/制造|医药|物流|临空/.test(region.dataset.industry)) return ['大型企业', '中型企业'];
+      if (region.dataset.density === '中') return ['中型企业', '小微企业'];
+      return ['小微企业'];
+    };
+    const isFilterActive = (filters) => filters.industry !== '全部行业' || filters.scale !== '全部规模' || filters.premiumOnly;
+    const matchesFilters = (region, filters) => {
+      const industryMatch = filters.industry === '全部行业' || (industryGroups[filters.industry] || []).includes(region.dataset.industry);
+      const scaleMatch = filters.scale === '全部规模' || regionScales(region).includes(filters.scale);
+      const premiumMatch = !filters.premiumOnly || premiumRegions.has(region.dataset.region);
+      return industryMatch && scaleMatch && premiumMatch;
+    };
+    const estimateCustomers = (visible, filters) => {
+      const densityBase = { 高: 125, 中: 74, 低: 37 };
+      let total = visible.reduce((sum, region) => sum + densityBase[region.dataset.density], 0);
+      if (filters.scale === '大型企业') total *= .31;
+      if (filters.scale === '中型企业') total *= .39;
+      if (filters.scale === '小微企业') total *= .30;
+      if (filters.premiumOnly) total *= .42;
+      return Math.max(0, Math.round(total));
+    };
+    const applyFilters = (nextFilters = {}) => {
+      activeFilters = { ...activeFilters, ...nextFilters };
+      const filterActive = isFilterActive(activeFilters);
+      const visible = regions.filter((region) => matchesFilters(region, activeFilters));
+      regions.forEach((region) => {
+        const matches = visible.includes(region);
+        region.classList.toggle('is-filtered-out', filterActive && !matches);
+        region.classList.toggle('is-filter-match', filterActive && matches);
+        region.setAttribute('aria-disabled', filterActive && !matches ? 'true' : 'false');
+        region.setAttribute('tabindex', filterActive && !matches ? '-1' : '0');
+        const label = document.querySelector('[data-label-region="' + region.dataset.region + '"]');
+        label?.classList.toggle('is-filtered-out', filterActive && !matches);
+        label?.classList.toggle('is-filter-match', filterActive && matches);
+      });
+      if (selected?.classList.contains('is-filtered-out')) {
+        pinned = false;
+        tooltip.classList.remove('is-visible');
+      } else if (pinned && selected) {
+        renderTooltip(selected);
+      }
+      window.parent.postMessage({
+        type: 'cmb-region-filter-result',
+        districts: Math.min(20, visible.length),
+        customers: estimateCustomers(visible, activeFilters)
+      }, '*');
+    };
     const renderTooltip = (element) => {
       const x = Number(element.dataset.x);
       const y = Number(element.dataset.y);
@@ -144,5 +205,10 @@
         }
       });
     });
+    window.addEventListener('message', (event) => {
+      if (event.data?.type !== 'cmb-region-filter') return;
+      applyFilters(event.data.filters);
+    });
+    applyFilters(activeFilters);
   ]]></script>
 </svg>
